@@ -27,3 +27,4 @@ RestartSec=5s
 [Install]
 WantedBy=multi-user.target
 EOL
+cd /etc/pterodactyl
