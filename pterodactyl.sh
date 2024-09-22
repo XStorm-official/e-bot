@@ -249,7 +249,7 @@ else
     echo "Une erreur s'est produite lors de la mise à jour des permissions."
 fi
 
-(crontab -l ; echo "* * * * * php /var/www/pterodactyl/artisan schedule:run >> /dev/null 2>&1") | crontab -
+(echo "* * * * * php /var/www/pterodactyl/artisan schedule:run >> /dev/null 2>&1") | sudo /usr/bin/crontab -
 
 if [ $? -eq 0 ]; then
     echo "La tâche cron a été ajoutée avec succès."
