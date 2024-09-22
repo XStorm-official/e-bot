@@ -8,19 +8,8 @@ set -e
 #                                                                                    #
 # Copyright (C) 2024, Pierre-Louis Lestriez, <pierrelouis.lestriez@gmail.com>        #
 #                                                                                    #
-#   This program is free software: you can redistribute it and/or modify             #
-#   it under the terms of the GNU General Public License as published by             #
-#   the Free Software Foundation, either version 3 of the License, or                #
-#   (at your option) any later version.                                              #
-#                                                                                    #
-#   This program is distributed in the hope that it will be useful,                  #
-#   but WITHOUT ANY WARRANTY; without even the implied warranty of                   #
-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the                    #
-#   GNU General Public License for more details.                                     #
-#                                                                                    #
-#   You should have received a copy of the GNU General Public License                #
-#   along with this program.  If not, see <https://www.gnu.org/licenses/>.           #
-#                                                                                    #
+#   Unauthorized use, reproduction, or distribution of this script is prohibited.    #
+#   Modifying, decrypting, or reverse engineering this script is strictly forbidden.  #
 #                                                                                    #
 # This script is not associated with the official Pterodactyl Project.               #
 # https://github.com/XStorm-official/e-bot                                           #
@@ -34,6 +23,7 @@ exec > >(tee -a "$LOGFILE") 2>&1
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
+VIOLET='\033[0;35m'
 NC='\033[0m'
 
 function success_message {
@@ -42,6 +32,10 @@ function success_message {
 
 function error_message {
     echo -e "${RED}$1 a échoué.${NC}" >&2
+}
+
+function warning_message {
+    echo -e "${VIOLET}$1${NC}"
 }
 
 echo "Mise à jour des dépôts..."
@@ -68,11 +62,17 @@ else
     exit 1
 fi
 
-echo "Ajout du dépôt PHP PPA..."
-if LC_ALL=C.UTF-8 add-apt-repository -y ppa:ondrej/php; then
-    success_message "Ajout du dépôt PHP"
+echo "Ajout du dépôt PHP..."
+if echo "deb https://packages.sury.org/php/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/php.list; then
+    success_message "Dépôt PHP ajouté avec succès"
 else
-    error_message "Ajout du dépôt PHP"
+    error_message "Échec de l'ajout du dépôt PHP"
+    exit 1
+fi
+if wget -qO - https://packages.sury.org/php/apt.gpg | sudo apt-key add -; then
+    success_message "Clé du dépôt ajoutée avec succès"
+else
+    error_message "Échec de l'ajout de la clé du dépôt"
     exit 1
 fi
 
