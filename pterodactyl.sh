@@ -53,7 +53,7 @@ else
 fi
 
 echo "Installation des paquets nécessaires..."
-if sudo apt install -y software-properties-common curl apt-transport-https ca-certificates gnupg apache2; then
+if sudo apt install -y software-properties-common curl apt-transport-https ca-certificates gnupg apache2 cron; then
     success_message "Paquets nécessaires installés"
 else
     error_message "Échec de l'installation des paquets"
