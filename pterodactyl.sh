@@ -53,7 +53,7 @@ else
 fi
 
 echo "Installation des paquets nécessaires..."
-if sudo apt install -y software-properties-common curl apt-transport-https ca-certificates gnupg; then
+if sudo apt install -y software-properties-common curl apt-transport-https ca-certificates gnupg apache2; then
     success_message "Paquets nécessaires installés"
 else
     error_message "Échec de l'installation des paquets"
@@ -192,5 +192,215 @@ if php artisan key:generate --force; then
     success_message "Clé d'application générée"
 else
     error_message "Échec de la génération de la clé d'application"
+    exit 1
+fi
+
+php artisan p:environment:setup
+
+if [ $? -eq 0 ]; then
+    echo "La configuration de l'environnement s'est effectuée sans erreur."
+else
+    echo "Une erreur s'est produite lors de la configuration de l'environnement."
+fi
+
+php artisan p:environment:database
+
+if [ $? -eq 0 ]; then
+    echo "La configuration de la nase de donnée s'est effectuée sans erreur."
+else
+    echo "Une erreur s'est produite lors de la configuration de la base de donnée."
+fi
+
+read -p "Souhaitez-vous configurer les mails ? (o/n) : " configure_mails
+
+if [[ "$configure_mails" =~ ^[oO]$ ]]; then
+    php artisan p:environment:mail
+
+    if [ $? -eq 0 ]; then
+        echo "La configuration des mails s'est effectuée sans erreur."
+    else
+        echo "Une erreur s'est produite lors de la configuration des mails."
+    fi
+else
+    echo "Configuration des mails ignorée."
+fi
+
+php artisan migrate --seed --force
+
+if [ $? -eq 0 ]; then
+    echo "Migration de la base de données et semis effectués sans erreur."
+else
+    echo "Une erreur s'est produite lors de la migration de la base de données."
+fi
+
+php artisan p:user:make
+
+if [ $? -eq 0 ]; then
+    echo "L'utilisateur a été créé avec succès."
+else
+    echo "Une erreur s'est produite lors de la création de l'utilisateur."
+fi
+
+chown -R www-data:www-data /var/www/pterodactyl/*
+
+if [ $? -eq 0 ]; then
+    echo "Les permissions ont été mises à jour avec succès."
+else
+    echo "Une erreur s'est produite lors de la mise à jour des permissions."
+fi
+
+(crontab -l ; echo "* * * * * php /var/www/pterodactyl/artisan schedule:run >> /dev/null 2>&1") | crontab -
+
+if [ $? -eq 0 ]; then
+    echo "La tâche cron a été ajoutée avec succès."
+else
+    echo "Une erreur s'est produite lors de l'ajout de la tâche cron."
+fi
+
+cat <<EOL | sudo tee /etc/systemd/system/pteroq.service
+# Pterodactyl Queue Worker File
+# ----------------------------------
+
+[Unit]
+Description=Pterodactyl Queue Worker
+After=redis-server.service
+
+[Service]
+# On some systems the user and group might be different.
+# Some systems use `apache` or `nginx` as the user and group.
+User=www-data
+Group=www-data
+Restart=always
+ExecStart=/usr/bin/php /var/www/pterodactyl/artisan queue:work --queue=high,standard,low --sleep=3 --tries=3
+StartLimitInterval=180
+StartLimitBurst=30
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+if [ $? -eq 0 ]; then
+    echo "Le fichier pteroq.service a été créé avec succès."
+else
+    echo "Une erreur s'est produite lors de la création du fichier pteroq.service."
+fi
+
+sudo systemctl enable --now redis-server
+
+if [ $? -eq 0 ]; then
+    echo "Le service redis-server a été activé et démarré avec succès."
+else
+    echo "Une erreur s'est produite lors de l'activation et du démarrage de redis-server."
+fi
+
+sudo systemctl enable --now pteroq.service
+
+if [ $? -eq 0 ]; then
+    echo "Le service pteroq a été activé et démarré avec succès."
+else
+    echo "Une erreur s'est produite lors de l'activation et du démarrage de pteroq."
+fi
+
+mkdir -p /etc/certs
+
+if [ $? -eq 0 ]; then
+    echo "Le répertoire /etc/certs a été créé avec succès."
+else
+    echo "Une erreur s'est produite lors de la création du répertoire /etc/certs."
+    exit 1
+fi
+
+cd /etc/certs
+
+openssl req -new -newkey rsa:4096 -days 3650 -nodes -x509 -subj "/C=NA/ST=NA/L=NA/O=NA/CN=Generic SSL Certificate" -keyout privkey.pem -out fullchain.pem
+
+if [ $? -eq 0 ]; then
+    echo "Le certificat SSL a été généré avec succès."
+else
+    echo "Une erreur s'est produite lors de la génération du certificat SSL."
+    exit 1
+fi
+
+read -p "Veuillez entrer le nom de domaine : " DOMAINNAME
+
+sudo a2dissite 000-default.conf
+
+if [ $? -eq 0 ]; then
+    echo "Le site par défaut a été désactivé avec succès."
+else
+    echo "Une erreur s'est produite lors de la désactivation du site par défaut."
+    exit 1
+fi
+
+cat <<EOL | sudo tee /etc/apache2/sites-available/pterodactyl.conf
+<VirtualHost *:80>
+    ServerName $DOMAINNAME
+
+    RewriteEngine On
+    RewriteCond %{HTTPS} !=on
+    RewriteRule ^/?(.*) https://%{SERVER_NAME}/$1 [R,L] 
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName $DOMAINNAME
+    DocumentRoot "/var/www/pterodactyl/public"
+
+    AllowEncodedSlashes On
+
+    php_value upload_max_filesize 100M
+    php_value post_max_size 100M
+
+    <Directory "/var/www/pterodactyl/public">
+        Require all granted
+        AllowOverride all
+    </Directory>
+
+    SSLEngine on
+    SSLCertificateFile /etc/certs/fullchain.pem 
+    SSLCertificateKeyFile /etc/certs/privkey.pem 
+</VirtualHost>
+EOL
+
+if [ $? -eq 0 ]; then
+    echo "Le fichier pterodactyl.conf a été créé avec succès."
+else
+    echo "Une erreur s'est produite lors de la création du fichier pterodactyl.conf."
+    exit 1
+fi
+
+sudo ln -s /etc/apache2/sites-available/pterodactyl.conf /etc/apache2/sites-enabled/pterodactyl.conf
+
+if [ $? -eq 0 ]; then
+    echo "Le lien symbolique pour pterodactyl.conf a été créé avec succès."
+else
+    echo "Une erreur s'est produite lors de la création du lien symbolique."
+    exit 1
+fi
+
+sudo a2enmod rewrite
+
+if [ $? -eq 0 ]; then
+    echo "Le module rewrite a été activé avec succès."
+else
+    echo "Une erreur s'est produite lors de l'activation du module rewrite."
+    exit 1
+fi
+
+sudo a2enmod ssl
+
+if [ $? -eq 0 ]; then
+    echo "Le module ssl a été activé avec succès."
+else
+    echo "Une erreur s'est produite lors de l'activation du module ssl."
+    exit 1
+fi
+
+sudo systemctl restart apache2
+
+if [ $? -eq 0 ]; then
+    echo "Apache a été redémarré avec succès."
+else
+    echo "Une erreur s'est produite lors du redémarrage d'Apache."
     exit 1
 fi
